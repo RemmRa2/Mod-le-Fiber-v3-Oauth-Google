@@ -15,14 +15,16 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+// Structure adaptée pour l'API UserInfo v3
 type GoogleUser struct {
-	ID      string `json:"id"`
+	ID      string `json:"sub"` // En API v3 / OpenID Connect, l'ID unique est sous la clé "sub"
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
 }
 
 func main() {
+	// Initialisation de Fiber v3
 	app := fiber.New()
 
 	conf := &oauth2.Config{
@@ -52,7 +54,7 @@ func main() {
 			Expires:  time.Now().Add(15 * time.Minute),
 		})
 
-		// On envoie le state à Google
+		// Redirection (Syntaxe Fiber v3)
 		url := conf.AuthCodeURL(stateToken, oauth2.AccessTypeOffline)
 		return c.Redirect().To(url)
 	})
@@ -78,8 +80,8 @@ func main() {
 
 		client := conf.Client(ctx, token)
 
-		// A. Récupération des infos du profil JSON
-		resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+		// A. Récupération des infos du profil via l'API UserInfo V3
+		resp, err := client.Get("https://www.googleapis.com/oauth2/v3/userinfo")
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).SendString("Erreur profil Google")
 		}
@@ -91,14 +93,16 @@ func main() {
 		}
 
 		// B. Téléchargement optionnel du binaire de l'image de profil
-		imgResp, err := client.Get(user.Picture)
-		if err == nil {
-			defer imgResp.Body.Close()
-			imageBytes, _ := io.ReadAll(imgResp.Body)
-			fmt.Printf("Image de profil téléchargée pour %s ! Taille : %d octets\n", user.Email, len(imageBytes))
+		if user.Picture != "" {
+			imgResp, err := client.Get(user.Picture)
+			if err == nil {
+				defer imgResp.Body.Close()
+				imageBytes, _ := io.ReadAll(imgResp.Body)
+				fmt.Printf("Image de profil téléchargée pour %s ! ID unique (sub) : %s | Taille : %d octets\n", user.Email, user.ID, len(imageBytes))
+			}
 		}
 
-		// C. POSE DU COOKIE HTTPOnly DE SESSION FINAL
+		// C. Cookie HTTPOnly de session
 		c.Cookie(&fiber.Cookie{
 			Name:     "session_token",
 			Value:    token.AccessToken,
@@ -108,7 +112,7 @@ func main() {
 			SameSite: "Lax",
 		})
 
-		return c.SendString(fmt.Sprintf("Connexion réussie pour %s ! Sécurité CSRF validée.", user.Email))
+		return c.SendString(fmt.Sprintf("Connexion réussie pour %s !\nID unique Google (sub) : %s\nSécurité CSRF validée.", user.Email, user.ID))
 	})
 
 	log.Fatal(app.Listen(":3000"))
